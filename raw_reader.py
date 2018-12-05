@@ -5,7 +5,7 @@ import numpy as np
 from collections import OrderedDict
 
 import clr
-from clr.System import NullReferenceException
+from System import NullReferenceException
 try:
     sys.path.append(os.path.join(os.path.dirname(os.path.realpath(__file__)), "ThermoRawFileReader_3_0_41/Libraries"))
     clr.AddReference('ThermoFisher.CommonCore.RawFileReader')
@@ -46,7 +46,8 @@ class RawReaderInterface(ScanDataSource):
         return _make_id(scan_number + 1)
 
     def _is_profile(self, scan):
-        return not self._source.IsCentroidScanFromScanNumber(scan)
+        return not self._source.IsCentroidScanFromScanNumber(
+            scan.scan_number + 1)
 
     def _polarity(self, scan):
         filter_string = self._filter_string(scan)
