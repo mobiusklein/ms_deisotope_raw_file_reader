@@ -77,7 +77,7 @@ class RawReaderInterface(ScanDataSource):
         scan_number = scan.scan_number
         filt = self._source.GetFilterForScanNumber(scan_number + 1)
         seq_index = filt.MSOrder - 2
-        width = filt.GetIsolationWidth(seq_index) / 2
+        width = filt.GetIsolationWidth(seq_index)
         offset = filt.GetIsolationWidthOffset(seq_index)
         precursor_mz = filt.GetMass(seq_index)
         return IsolationWindow(width, precursor_mz + offset, width)
