@@ -1,13 +1,11 @@
 import sys
 import os
-import re
 import numpy as np
 
 from collections import OrderedDict
-from weakref import WeakValueDictionary
 
 import clr
-
+from clr.System import NullReferenceException
 try:
     sys.path.append(os.path.join(os.path.dirname(os.path.realpath(__file__)), "ThermoRawFileReader_3_0_41/Libraries"))
     clr.AddReference('ThermoFisher.CommonCore.RawFileReader')
@@ -201,10 +199,10 @@ class RawReaderInterface(ScanDataSource):
 
 
 class ThermoRaw(RawReaderInterface, RandomAccessScanSource, _RawFileMetadataLoader):
-    def __init__(self, filename, _load_metadata=True, **kwargs):
-        self._source = RawFileReader.RawFileReaderAdapter.FileFactory(filename)
+    def __init__(self, source_file, _load_metadata=True, **kwargs):
+        self._source = RawFileReader.RawFileReaderAdapter.FileFactory(source_file)
         self._source.SelectInstrument(Business.Device.MS, 1)
-        self.filename = filename
+        self.source_file = source_file
         self._producer = None
         self._scan_type_index = dict()
         self.make_iterator()
@@ -270,7 +268,10 @@ class ThermoRaw(RawReaderInterface, RandomAccessScanSource, _RawFileMetadataLoad
         return index
 
     def _parse_method(self):
-        return _InstrumentMethod(self._source.GetInstrumentMethod(0))
+        try:
+            return _InstrumentMethod(self._source.GetInstrumentMethod(0))
+        except NullReferenceException:
+            return _InstrumentMethod('')
 
     def _scan_time_to_scan_number(self, scan_time):
         scan_number = self._source.ScanNumberFromRetentionTime(scan_time) - 1
