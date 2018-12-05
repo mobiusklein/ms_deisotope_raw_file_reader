@@ -28,7 +28,7 @@ from ms_deisotope.data_source.metadata.activation import (
 
 from ms_deisotope.data_source.thermo_raw import (
     _InstrumentMethod, ThermoRawScanPtr, FilterString,
-    _make_id, _id_template, _RawFileMetadataLoader)
+    _make_id, _id_template, _RawFileMetadataLoader, analyzer_map)
 
 
 class RawReaderInterface(ScanDataSource):
@@ -171,6 +171,14 @@ class RawReaderInterface(ScanDataSource):
             window_list=[ScanWindow(
                 fline.get("scan_window")[0], fline.get("scan_window")[1])], traits=traits)
         return ScanAcquisitionInformation("no combination", [event])
+
+    def _instrument_configuration(self, scan):
+        fline = self._filter_string(scan)
+        try:
+            confid = self._analyzer_to_configuration_index[analyzer_map[fline.data.get("analyzer")]]
+            return self._instrument_config[confid]
+        except KeyError:
+            return None
 
     def _annotations(self, scan):
         fline = self._filter_string(scan)
