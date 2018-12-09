@@ -31,11 +31,20 @@ from ms_deisotope.data_source.thermo_raw import (
     _make_id, _id_template, _RawFileMetadataLoader, analyzer_map)
 
 
+def is_thermo_raw_file(path):
+    try:
+        source = RawFileReader.RawFileReaderAdapter.FileFactory(path)
+        source.SelectInstrument(Business.Device.MS, 1)
+        return True
+    except NullReferenceException:
+        return False
+
+
 class RawReaderInterface(ScanDataSource):
 
     def _scan_arrays(self, scan):
-        scan_number = scan.scan_number
-        stats = self._source.GetScanStatsForScanNumber(scan_number + 1)
+        scan_number = scan.scan_number + 1
+        stats = self._source.GetScanStatsForScanNumber(scan_number)
         segscan = self._source.GetSegmentedScanFromScanNumber(scan_number, stats)
         mzs = np.array(list(segscan.Positions), dtype=np.float64)
         inten = np.array(list(segscan.Intensities), dtype=np.float64)
@@ -188,14 +197,14 @@ class RawReaderInterface(ScanDataSource):
         }
         microscans = trailer_extras.get("Micro Scan Count")
         if microscans is not None:
-            annots['[Thermo Trailer Extra]Micro Scan Count'] = microscans
+            annots['[Thermo Trailer Extra]Micro Scan Count'] = float(microscans)
         scan_segment = trailer_extras.get("Scan Segment")
         if scan_segment is not None:
-            annots['[Thermo Trailer Extra]Scan Segment'] = scan_segment
+            annots['[Thermo Trailer Extra]Scan Segment'] = int(scan_segment)
         scan_event = trailer_extras.get("Scan Event")
         if scan_event is not None:
-            annots['[Thermo Trailer Extra]Scan Event'] = scan_event
-        mono_mz = trailer_extras.get("Monoisotopic M/Z")
+            annots['[Thermo Trailer Extra]Scan Event'] = int(scan_event)
+        mono_mz = float(trailer_extras.get("Monoisotopic M/Z", 0))
         if mono_mz is not None and mono_mz > 0:
             annots['[Thermo Trailer Extra]Monoisotopic M/Z'] = mono_mz
         hcd_ev = trailer_extras.get('HCD Energy eV')
