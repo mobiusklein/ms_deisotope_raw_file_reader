@@ -4,18 +4,6 @@ import numpy as np
 
 from collections import OrderedDict
 
-import clr
-from System import NullReferenceException
-try:
-    sys.path.append(os.path.join(os.path.dirname(os.path.realpath(__file__)), "ThermoRawFileReader_3_0_41/Libraries"))
-    clr.AddReference('ThermoFisher.CommonCore.RawFileReader')
-    clr.AddReference('ThermoFisher.CommonCore.Data')
-except Exception:
-    raise
-
-import ThermoFisher.CommonCore.Data.Business as Business
-import ThermoFisher.CommonCore.RawFileReader as RawFileReader
-
 
 from ms_deisotope.data_source.common import (
     PrecursorInformation, ChargeNotProvided, Scan,
@@ -26,18 +14,92 @@ from ms_deisotope.data_source.common import (
 from ms_deisotope.data_source.metadata.activation import (
     supplemental_term_map, dissociation_methods_map)
 
-from ms_deisotope.data_source.thermo_raw import (
+from ms_deisotope.data_source._thermo_helper import (
     _InstrumentMethod, ThermoRawScanPtr, FilterString,
     _make_id, _id_template, _RawFileMetadataLoader, analyzer_map)
 
 
+_DEFAULT_DLL_PATH = os.path.join(
+    os.path.dirname(
+        os.path.realpath(__file__)),
+    "ThermoRawFileReader_3_0_41",
+    "Libraries")
+
+
+# late binding imports
+
+Business = None
+_RawFileReader = None
+clr = None
+NullReferenceException = Exception
+
+
 def is_thermo_raw_file(path):
+    if not _test_dll_loaded():
+        try:
+            register_dll()
+        except ImportError:
+            return False
     try:
-        source = RawFileReader.RawFileReaderAdapter.FileFactory(path)
+        source = _RawFileReader.RawFileReaderAdapter.FileFactory(path)
         source.SelectInstrument(Business.Device.MS, 1)
         return True
-    except NullReferenceException:
+    except (NullReferenceException):
         return False
+
+
+def infer_reader(path):
+    if is_thermo_raw_file(path):
+        return ThermoRawLoader
+    raise ValueError("Not Thermo Raw File")
+
+
+def determine_if_available():
+    try:
+        return _register_dll([_DEFAULT_DLL_PATH])
+    except (OSError, ImportError):
+        return False
+
+
+def _register_dll(search_paths=None):
+    if search_paths is None:
+        search_paths = []
+    global _RawFileReader, Business, clr, NullReferenceException
+    if _test_dll_loaded():
+        return True
+    try:
+        import clr
+        from System import NullReferenceException
+    except ImportError:
+        return False
+    for path in search_paths:
+        sys.path.append(path)
+        try:
+            clr.AddReference('ThermoFisher.CommonCore.RawFileReader')
+            clr.AddReference('ThermoFisher.CommonCore.Data')
+        except OSError:
+            continue
+        try:
+            import ThermoFisher.CommonCore.Data.Business as Business
+            import ThermoFisher.CommonCore.RawFileReader as _RawFileReader
+        except ImportError:
+            continue
+    return _test_dll_loaded()
+
+
+def register_dll(search_paths=None):
+    if search_paths is None:
+        search_paths = []
+    search_paths = list(search_paths)
+    search_paths.append(_DEFAULT_DLL_PATH)
+    loaded = _register_dll(search_paths)
+    if not loaded:
+        msg = '''The ThermoFisher.CommonCore libraries could not be located and loaded.'''
+        raise ImportError(msg)
+
+
+def _test_dll_loaded():
+    return _RawFileReader is not None
 
 
 class RawReaderInterface(ScanDataSource):
@@ -95,6 +157,21 @@ class RawReaderInterface(ScanDataSource):
         scan_number = scan.scan_number
         trailers = self._source.GetTrailerExtraInformation(scan_number + 1)
         return OrderedDict(zip(map(lambda x: x.strip(":"), trailers.Labels), trailers.Values))
+
+    def _infer_precursor_scan_number(self, scan):
+        precursor_scan_number = None
+        last_index = self._scan_index(scan) - 1
+        current_level = self._ms_level(scan)
+        i = 0
+        while last_index >= 0 and i < 100:
+            prev_scan = self.get_scan_by_index(last_index)
+            if prev_scan.ms_level >= current_level:
+                last_index -= 1
+            else:
+                precursor_scan_number = prev_scan._data.scan_number
+                break
+            i += 1
+        return precursor_scan_number
 
     def _precursor_information(self, scan):
         scan_number = scan.scan_number
@@ -216,9 +293,11 @@ class RawReaderInterface(ScanDataSource):
         return annots
 
 
-class ThermoRaw(RawReaderInterface, RandomAccessScanSource, _RawFileMetadataLoader):
+class ThermoRawLoader(RawReaderInterface, RandomAccessScanSource, _RawFileMetadataLoader):
     def __init__(self, source_file, _load_metadata=True, **kwargs):
-        self._source = RawFileReader.RawFileReaderAdapter.FileFactory(source_file)
+        if not _test_dll_loaded():
+            register_dll()
+        self._source = _RawFileReader.RawFileReaderAdapter.FileFactory(source_file)
         self._source.SelectInstrument(Business.Device.MS, 1)
         self.source_file = source_file
         self._producer = None
@@ -226,7 +305,7 @@ class ThermoRaw(RawReaderInterface, RandomAccessScanSource, _RawFileMetadataLoad
         self.make_iterator()
         self.initialize_scan_cache()
         self._first_scan_time = self.get_scan_by_index(0).scan_time
-        self._last_scan_time = self.get_scan_by_index(self._source.RunHeaderEx.LastSpectrum - 2).scan_time
+        self._last_scan_time = self.get_scan_by_index(self._source.RunHeaderEx.LastSpectrum - 1).scan_time
         self._index = self._pack_index()
 
         if _load_metadata:
@@ -281,7 +360,7 @@ class ThermoRaw(RawReaderInterface, RandomAccessScanSource, _RawFileMetadataLoad
 
     def _pack_index(self):
         index = OrderedDict()
-        for sn in range(self._source.RunHeaderEx.FirstSpectrum, self._source.RunHeaderEx.LastSpectrum - 1):
+        for sn in range(self._source.RunHeaderEx.FirstSpectrum - 1, self._source.RunHeaderEx.LastSpectrum):
             index[_make_id(sn)] = sn
         return index
 
@@ -337,7 +416,7 @@ class ThermoRaw(RawReaderInterface, RandomAccessScanSource, _RawFileMetadataLoad
         -------
         Scan
         """
-        scan_number = int(str(scan_id).replace(_id_template, ''))
+        scan_number = int(str(scan_id).replace(_id_template, '')) - 1
         try:
             return self._scan_cache[scan_number]
         except KeyError:
